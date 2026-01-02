@@ -1,0 +1,55 @@
+{
+  "name": "veto",
+  "version": "1.0.0",
+  "description": "Discord proxy bypass for Russian users",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "package": "node build.js"
+  },
+  "keywords": [
+    "discord",
+    "proxy",
+    "russia",
+    "bypass"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "boxen": "^5.1.2",
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "figlet": "^1.7.0",
+    "http-proxy": "^1.18.1",
+    "ora": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/figlet": "^1.5.8",
+    "@types/http-proxy": "^1.17.14",
+    "@types/node": "^20.10.6",
+    "pkg": "^5.8.1",
+    "resedit": "^3.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "bin": {
+    "veto": "./dist/index.js"
+  },
+  "pkg": {
+    "assets": [
+      "node_modules/figlet/fonts/**/*",
+      "node_modules/boxen/**/*",
+      "node_modules/chalk/**/*",
+      "node_modules/ora/**/*"
+    ],
+    "scripts": [
+      "dist/**/*.js"
+    ],
+    "outputPath": "build",
+    "targets": [
+      "node18-win-x64"
+    ]
+  }
+}

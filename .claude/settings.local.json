@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc)",
+      "Bash(npm run dev:*)",
+      "Bash(node dist/index.js:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(where:*)",
+      "Bash(.veto.exe start)",
+      "Bash(veto.exe start:*)",
+      "Bash(cmd /c \"cd c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\build && veto.exe start\")",
+      "Bash(npm run package:*)",
+      "Bash(dir:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(cmd /c \"dir c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\dist /b\")",
+      "Bash(cmd /c \"dir c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\src /b /s\")",
+      "Bash(c:UsersdybekDesktopvetobuildveto.exe --version)",
+      "Bash(cmd /c \"c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\build\\\\veto.exe --version\")",
+      "Bash(cmd /c \"c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\build\\\\veto.exe\")",
+      "Bash(cmd /c \"dir c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\build\")",
+      "Bash(powershell -Command:*)",
+      "Bash(cmd /c \"c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\build\\\\veto.exe --help\")",
+      "Bash(cmd /c \"start /wait c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\build\\\\veto.exe\")",
+      "Bash(cmd /c \"cd c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\build && start cmd /k veto.exe\")",
+      "Bash(cmd /c \"del /F c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\build\\\\veto.exe\")",
+      "Bash(npx pkg:*)",
+      "Bash(cmd /c \"dir c:\\\\Users\\\\dybek\\\\Desktop\\\\veto\\\\dist /b /s\")",
+      "Bash(git init:*)",
+      "Bash(git config:*)",
+      "Bash(git remote add:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

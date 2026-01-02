@@ -1,0 +1,62 @@
+import { DISCORD_DOMAINS, LOCAL_PROXY_PORT } from '../config/domains';
+
+export class PACGenerator {
+  static generate(): string {
+    const domains = DISCORD_DOMAINS.map(d => d.replace('*.', '')).join('|');
+
+    return `function FindProxyForURL(url, host) {
+  // Normalize host
+  host = host.toLowerCase();
+
+  // Discord domains that should go through proxy
+  var discordDomains = [${DISCORD_DOMAINS.map(d => `"${d}"`).join(', ')}];
+
+  // Check if host matches any Discord domain
+  for (var i = 0; i < discordDomains.length; i++) {
+    var domain = discordDomains[i];
+
+    if (domain.indexOf('*.') === 0) {
+      // Wildcard domain
+      var baseDomain = domain.substring(2);
+      if (host === baseDomain || host.indexOf('.' + baseDomain) !== -1) {
+        return "PROXY 127.0.0.1:${LOCAL_PROXY_PORT}";
+      }
+    } else {
+      // Exact domain match
+      if (host === domain) {
+        return "PROXY 127.0.0.1:${LOCAL_PROXY_PORT}";
+      }
+    }
+  }
+
+  // All other traffic goes direct
+  return "DIRECT";
+}`;
+  }
+
+  static getFilePath(): string {
+    const os = require('os');
+    const path = require('path');
+    return path.join(os.tmpdir(), 'veto-proxy.pac');
+  }
+
+  static async write(): Promise<string> {
+    const fs = require('fs').promises;
+    const filePath = this.getFilePath();
+    const content = this.generate();
+
+    await fs.writeFile(filePath, content, 'utf8');
+    return filePath;
+  }
+
+  static async remove(): Promise<void> {
+    const fs = require('fs').promises;
+    const filePath = this.getFilePath();
+
+    try {
+      await fs.unlink(filePath);
+    } catch (err) {
+      // Ignore if file doesn't exist
+    }
+  }
+}
