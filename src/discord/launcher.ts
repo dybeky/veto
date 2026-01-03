@@ -108,13 +108,12 @@ export class DiscordLauncher {
       return false;
     }
 
-    // Kill existing Discord if requested
-    if (options.killExisting) {
-      const isRunning = await this.isDiscordRunning();
-      if (isRunning) {
-        await this.killDiscord();
-      }
-    }
+    // Always kill existing Discord to restart with proxy
+    // This ensures Discord runs with correct proxy settings
+    await this.killDiscord();
+
+    // Wait a bit more to ensure Discord is fully closed
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Launch Discord with proxy flag
     const proxyArg = `--proxy-server=http://${options.proxyHost}:${options.proxyPort}`;
