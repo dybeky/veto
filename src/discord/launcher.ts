@@ -166,9 +166,7 @@ export class DiscordLauncher {
     // Launch Discord with proxy flags
     const proxyServer = `http://${options.proxyHost}:${options.proxyPort}`;
     const proxyArgs = [
-      `--proxy-server=${proxyServer}`,
-      `--host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE ${options.proxyHost}"`,
-      '--ignore-certificate-errors'
+      `--proxy-server=${proxyServer}`
     ];
 
     process.stdout.write('\x1b[33m\u25CF\x1b[0m Starting Discord with proxy... ');
