@@ -22,6 +22,8 @@ import { BUILTIN_PROXIES, ProxyProvider } from './proxy/providers';
 import { ProxyChecker } from './proxy/checker';
 import { ProxyCache } from './proxy/cache';
 import { StatsMonitor } from './monitoring/stats';
+import { DiscordLauncher } from './discord/launcher';
+import { ProxyFetcher } from './proxy/fetcher';
 
 const program = new Command();
 
@@ -57,16 +59,31 @@ async function findWorkingProxy(): Promise<ProxyProvider> {
     }
   }
 
-  // If no cached proxy works, find new ones using parallel search
-  spinner.text = 'Searching for working proxies in parallel...';
-  const workingProxy = await checker.findWorkingProxyParallel(BUILTIN_PROXIES);
+  // Fetch fresh proxies from online sources
+  spinner.text = 'Fetching fresh proxy list from online sources...';
+  let freshProxies: ProxyProvider[] = [];
+  try {
+    freshProxies = await ProxyFetcher.fetchSocks5((msg) => {
+      spinner.text = msg;
+    });
+    spinner.text = `Fetched ${freshProxies.length} fresh proxies, testing...`;
+  } catch (err) {
+    spinner.text = 'Failed to fetch fresh proxies, trying built-in list...';
+  }
+
+  // Combine fresh proxies with built-in ones (fresh first)
+  const allProxies = [...freshProxies, ...BUILTIN_PROXIES];
+
+  // Find working proxy using parallel search
+  spinner.text = `Testing ${allProxies.length} proxies in parallel...`;
+  const workingProxy = await checker.findWorkingProxyParallel(allProxies);
 
   if (workingProxy) {
-    spinner.succeed(`Connected to ${workingProxy.name} (${workingProxy.country})`);
+    spinner.succeed(`Connected to ${workingProxy.name} (${workingProxy.host}:${workingProxy.port})`);
     await proxyCache.add(workingProxy, true);
 
     // Cache more working proxies in background
-    checker.findWorkingProxiesParallel(BUILTIN_PROXIES, 10).then(async (proxies) => {
+    checker.findWorkingProxiesParallel(allProxies, 10).then(async (proxies) => {
       for (const proxy of proxies) {
         await proxyCache.add(proxy, true);
       }
@@ -93,8 +110,19 @@ async function getNextWorkingProxy(): Promise<ProxyProvider | null> {
     await proxyCache.add(proxy, false);
   }
 
+  // Fetch fresh proxies
+  let freshProxies: ProxyProvider[] = [];
+  try {
+    freshProxies = await ProxyFetcher.fetchSocks5();
+  } catch {
+    // Ignore errors
+  }
+
+  // Combine fresh + built-in
+  const allProxies = [...freshProxies, ...BUILTIN_PROXIES];
+
   // Find new working proxy
-  const workingProxy = await checker.findWorkingProxyParallel(BUILTIN_PROXIES);
+  const workingProxy = await checker.findWorkingProxyParallel(allProxies);
   if (workingProxy) {
     await proxyCache.add(workingProxy, true);
   }
@@ -154,6 +182,31 @@ async function startProxy(options: any) {
     const cacheStats = proxyCache.getStats();
     Banner.showStatus('Cached Proxies', `${cacheStats.reliable}/${cacheStats.total} reliable`, 'active');
     console.log('');
+
+    // Auto-launch Discord with proxy settings
+    if (!options.noDiscord) {
+      const discordSpinner = ora('Launching Discord with proxy...').start();
+
+      const discordInfo = await DiscordLauncher.getInfo();
+
+      if (!discordInfo.installed) {
+        discordSpinner.warn('Discord not found - please launch manually with proxy flag');
+      } else {
+        const launched = await DiscordLauncher.launch({
+          proxyHost: '127.0.0.1',
+          proxyPort: proxyServer.getPort(),
+          killExisting: true // Kill existing Discord to restart with proxy
+        });
+
+        if (launched) {
+          discordSpinner.succeed('Discord launched with proxy settings');
+          Banner.showStatus('Discord', 'Running with proxy', 'active');
+        } else {
+          discordSpinner.fail('Failed to launch Discord');
+        }
+      }
+      console.log('');
+    }
 
     // Start periodic stats logging
     statsInterval = setInterval(() => {
@@ -277,6 +330,7 @@ program
   .command('start')
   .description('Start the proxy server')
   .option('-p, --port <number>', 'Local proxy port', String(LOCAL_PROXY_PORT))
+  .option('--no-discord', 'Do not auto-launch Discord')
   .action(startProxy);
 
 program

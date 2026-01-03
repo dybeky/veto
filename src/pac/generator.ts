@@ -12,14 +12,19 @@ export class PACGenerator {
   // Discord domains that should go through proxy
   var discordDomains = [${DISCORD_DOMAINS.map(d => `"${d}"`).join(', ')}];
 
+  // Helper function to check if host ends with suffix
+  function endsWith(str, suffix) {
+    return str.length >= suffix.length && str.substring(str.length - suffix.length) === suffix;
+  }
+
   // Check if host matches any Discord domain
   for (var i = 0; i < discordDomains.length; i++) {
     var domain = discordDomains[i];
 
     if (domain.indexOf('*.') === 0) {
-      // Wildcard domain
+      // Wildcard domain - match base domain and all subdomains
       var baseDomain = domain.substring(2);
-      if (host === baseDomain || host.indexOf('.' + baseDomain) !== -1) {
+      if (host === baseDomain || endsWith(host, '.' + baseDomain)) {
         return "PROXY 127.0.0.1:${LOCAL_PROXY_PORT}";
       }
     } else {
