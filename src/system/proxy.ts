@@ -64,8 +64,7 @@ export class SystemProxy {
   private async notifyProxyChange(): Promise<void> {
     // Refresh Internet Explorer settings to apply changes system-wide
     try {
-      const { exec } = require('child_process');
-      exec('rundll32.exe user32.dll,UpdatePerUserSystemParameters');
+      await execAsync('rundll32.exe user32.dll,UpdatePerUserSystemParameters');
     } catch (err) {
       // Ignore errors
     }

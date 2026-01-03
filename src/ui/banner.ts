@@ -14,7 +14,7 @@ export class Banner {
                                    `;
 
     const subtitle = 'Discord Proxy Bypass for Russia';
-    const version = 'v1.0.0';
+    const version = 'v2.0.0';
 
     try {
       console.clear();

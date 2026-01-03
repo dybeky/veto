@@ -1,9 +1,10 @@
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import { DISCORD_DOMAINS, LOCAL_PROXY_PORT } from '../config/domains';
 
 export class PACGenerator {
   static generate(): string {
-    const domains = DISCORD_DOMAINS.map(d => d.replace('*.', '')).join('|');
-
     return `function FindProxyForURL(url, host) {
   // Normalize host
   host = host.toLowerCase();
@@ -35,13 +36,10 @@ export class PACGenerator {
   }
 
   static getFilePath(): string {
-    const os = require('os');
-    const path = require('path');
     return path.join(os.tmpdir(), 'veto-proxy.pac');
   }
 
   static async write(): Promise<string> {
-    const fs = require('fs').promises;
     const filePath = this.getFilePath();
     const content = this.generate();
 
@@ -50,7 +48,6 @@ export class PACGenerator {
   }
 
   static async remove(): Promise<void> {
-    const fs = require('fs').promises;
     const filePath = this.getFilePath();
 
     try {

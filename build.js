@@ -75,12 +75,12 @@ try {
       LegalCopyright: 'MIT License',
       OriginalFilename: 'veto.exe',
       InternalName: 'veto',
-      FileVersion: '1.0.0.0',
-      ProductVersion: '1.0.0.0'
+      FileVersion: '2.0.0.0',
+      ProductVersion: '2.0.0.0'
     });
 
-    vi.setFileVersion(1, 0, 0, 0, 1033);
-    vi.setProductVersion(1, 0, 0, 0, 1033);
+    vi.setFileVersion(2, 0, 0, 0, 1033);
+    vi.setProductVersion(2, 0, 0, 0, 1033);
     vi.outputToResourceEntries(res.entries);
     console.log('  ✓ Version info added');
   }
