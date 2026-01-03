@@ -11,47 +11,46 @@ export interface DiscordLaunchOptions {
   killExisting?: boolean;
 }
 
+interface DiscordInstallation {
+  updateExe: string;
+  appExe: string;
+  name: string;
+}
+
 export class DiscordLauncher {
-  private static readonly DISCORD_PATHS = [
-    // Standard Discord
-    path.join(process.env.LOCALAPPDATA || '', 'Discord'),
-    // Discord PTB
-    path.join(process.env.LOCALAPPDATA || '', 'DiscordPTB'),
-    // Discord Canary
-    path.join(process.env.LOCALAPPDATA || '', 'DiscordCanary'),
-  ];
+  private static readonly DISCORD_FOLDERS = ['Discord', 'DiscordPTB', 'DiscordCanary'];
 
   /**
-   * Find Discord executable path
+   * Find Discord installation (Update.exe and app exe)
    */
-  static async findDiscordPath(): Promise<string | null> {
-    for (const basePath of this.DISCORD_PATHS) {
-      try {
-        const entries = await fs.readdir(basePath);
+  static async findDiscordInstallation(): Promise<DiscordInstallation | null> {
+    const localAppData = process.env.LOCALAPPDATA || '';
 
-        // Find latest app-* version folder
+    for (const folder of this.DISCORD_FOLDERS) {
+      const basePath = path.join(localAppData, folder);
+
+      try {
+        // Check for Update.exe (main launcher)
+        const updateExe = path.join(basePath, 'Update.exe');
+        await fs.access(updateExe);
+
+        // Find app-* folder for the actual exe
+        const entries = await fs.readdir(basePath);
         const appFolders = entries
           .filter(e => e.startsWith('app-'))
           .sort()
           .reverse();
 
         if (appFolders.length > 0) {
-          const exePath = path.join(basePath, appFolders[0], 'Discord.exe');
+          const exeName = folder === 'Discord' ? 'Discord.exe' :
+                          folder === 'DiscordPTB' ? 'DiscordPTB.exe' : 'DiscordCanary.exe';
+          const appExe = path.join(basePath, appFolders[0], exeName);
+
           try {
-            await fs.access(exePath);
-            return exePath;
+            await fs.access(appExe);
+            return { updateExe, appExe, name: folder };
           } catch {
-            // Try alternative names
-            const altNames = ['DiscordPTB.exe', 'DiscordCanary.exe'];
-            for (const name of altNames) {
-              const altPath = path.join(basePath, appFolders[0], name);
-              try {
-                await fs.access(altPath);
-                return altPath;
-              } catch {
-                continue;
-              }
-            }
+            continue;
           }
         }
       } catch {
@@ -60,6 +59,14 @@ export class DiscordLauncher {
     }
 
     return null;
+  }
+
+  /**
+   * Find Discord executable path (legacy method)
+   */
+  static async findDiscordPath(): Promise<string | null> {
+    const installation = await this.findDiscordInstallation();
+    return installation?.appExe || null;
   }
 
   /**
@@ -100,39 +107,65 @@ export class DiscordLauncher {
    * Launch Discord with proxy settings
    */
   static async launch(options: DiscordLaunchOptions): Promise<boolean> {
-    const discordPath = await this.findDiscordPath();
+    const installation = await this.findDiscordInstallation();
 
-    if (!discordPath) {
+    if (!installation) {
       console.error('Discord not found. Please install Discord or launch it manually with:');
       console.error(`  discord.exe --proxy-server="http://${options.proxyHost}:${options.proxyPort}"`);
       return false;
     }
 
+    console.log(`Found Discord: ${installation.name}`);
+    console.log(`Path: ${installation.appExe}`);
+
     // Always kill existing Discord to restart with proxy
-    // This ensures Discord runs with correct proxy settings
+    console.log('Closing Discord...');
     await this.killDiscord();
 
-    // Wait a bit more to ensure Discord is fully closed
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Wait for Discord to fully close
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Launch Discord with proxy flag
+    // Launch Discord with proxy flag using cmd /c start
     const proxyArg = `--proxy-server=http://${options.proxyHost}:${options.proxyPort}`;
 
     try {
-      // Use spawn with detached option so Discord runs independently
-      const child = spawn(discordPath, [proxyArg], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: false
+      // Method 1: Use Update.exe with --processStart (recommended way)
+      const command = `"${installation.updateExe}" --processStart "${path.basename(installation.appExe)}" --process-start-args="${proxyArg}"`;
+
+      console.log(`Launching Discord with proxy...`);
+
+      exec(command, { windowsHide: true }, (error) => {
+        if (error) {
+          console.error('Update.exe launch failed, trying direct launch...');
+          // Method 2: Direct launch as fallback
+          const child = spawn('cmd.exe', ['/c', 'start', '', installation.appExe, proxyArg], {
+            detached: true,
+            stdio: 'ignore',
+            shell: true
+          });
+          child.unref();
+        }
       });
 
-      // Unref to allow Node.js to exit independently
-      child.unref();
+      // Give Discord time to start
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       return true;
     } catch (err) {
       console.error('Failed to launch Discord:', err);
-      return false;
+
+      // Last resort: try direct spawn
+      try {
+        const child = spawn(installation.appExe, [proxyArg], {
+          detached: true,
+          stdio: 'ignore',
+          shell: true
+        });
+        child.unref();
+        return true;
+      } catch {
+        return false;
+      }
     }
   }
 
