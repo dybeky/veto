@@ -45,9 +45,16 @@ export class ProxyServer {
 
   private async connectThroughSocks5(host: string, port: number): Promise<net.Socket> {
     return new Promise((resolve, reject) => {
+      const hasAuth = !!(this.upstreamProxy.username && this.upstreamProxy.password);
+
       const socket = net.connect(this.upstreamProxy.port, this.upstreamProxy.host, () => {
-        // SOCKS5 handshake
-        socket.write(Buffer.from([0x05, 0x01, 0x00]));
+        // SOCKS5 handshake - offer auth methods
+        // 0x00 = no auth, 0x02 = username/password
+        if (hasAuth) {
+          socket.write(Buffer.from([0x05, 0x02, 0x00, 0x02]));
+        } else {
+          socket.write(Buffer.from([0x05, 0x01, 0x00]));
+        }
       });
 
       let step = 0;
@@ -59,29 +66,63 @@ export class ProxyServer {
       socket.on('data', (data) => {
         if (step === 0) {
           // Authentication method response
-          if (data[0] === 0x05 && data[1] === 0x00) {
+          if (data[0] !== 0x05) {
+            clearTimeout(timeout);
+            socket.destroy();
+            reject(new Error('SOCKS5 protocol error'));
+            return;
+          }
+
+          if (data[1] === 0x02 && hasAuth) {
+            // Server wants username/password auth
             step = 1;
-            // CONNECT request
-            const hostBuffer = Buffer.from(host);
-            const request = Buffer.concat([
-              Buffer.from([0x05, 0x01, 0x00, 0x03, hostBuffer.length]),
-              hostBuffer,
-              Buffer.from([port >> 8, port & 0xff])
+            const username = Buffer.from(this.upstreamProxy.username!);
+            const password = Buffer.from(this.upstreamProxy.password!);
+            const authRequest = Buffer.concat([
+              Buffer.from([0x01, username.length]),
+              username,
+              Buffer.from([password.length]),
+              password
             ]);
-            socket.write(request);
+            socket.write(authRequest);
+          } else if (data[1] === 0x00) {
+            // No auth required, proceed to connect
+            step = 2;
+            this.sendConnectRequest(socket, host, port);
           } else {
             clearTimeout(timeout);
             socket.destroy();
-            reject(new Error('SOCKS5 auth failed'));
+            reject(new Error('SOCKS5 auth method not supported'));
           }
         } else if (step === 1) {
+          // Auth response
+          if (data[0] === 0x01 && data[1] === 0x00) {
+            // Auth successful, send connect request
+            step = 2;
+            this.sendConnectRequest(socket, host, port);
+          } else {
+            clearTimeout(timeout);
+            socket.destroy();
+            reject(new Error('SOCKS5 authentication failed'));
+          }
+        } else if (step === 2) {
           // Connection response
           clearTimeout(timeout);
           if (data[0] === 0x05 && data[1] === 0x00) {
             resolve(socket);
           } else {
             socket.destroy();
-            reject(new Error('SOCKS5 connect failed'));
+            const errorCodes: { [key: number]: string } = {
+              0x01: 'General failure',
+              0x02: 'Connection not allowed',
+              0x03: 'Network unreachable',
+              0x04: 'Host unreachable',
+              0x05: 'Connection refused',
+              0x06: 'TTL expired',
+              0x07: 'Command not supported',
+              0x08: 'Address type not supported'
+            };
+            reject(new Error(`SOCKS5 connect failed: ${errorCodes[data[1]] || 'Unknown error'}`));
           }
         }
       });
@@ -91,6 +132,16 @@ export class ProxyServer {
         reject(err);
       });
     });
+  }
+
+  private sendConnectRequest(socket: net.Socket, host: string, port: number): void {
+    const hostBuffer = Buffer.from(host);
+    const request = Buffer.concat([
+      Buffer.from([0x05, 0x01, 0x00, 0x03, hostBuffer.length]),
+      hostBuffer,
+      Buffer.from([port >> 8, port & 0xff])
+    ]);
+    socket.write(request);
   }
 
   private trackConnection(socket: Duplex): void {
@@ -127,9 +178,13 @@ export class ProxyServer {
         this.trackConnection(clientSocket);
         this.stats.connectionStarted();
 
+        console.log(`[CONNECT] ${hostname}:${port} - Discord: ${this.isDiscordDomain(hostname)}`);
+
         if (this.isDiscordDomain(hostname)) {
           try {
+            console.log(`[PROXY] Connecting to ${hostname}:${port} via ${this.upstreamProxy.host}:${this.upstreamProxy.port}`);
             const proxySocket = await this.connectThroughSocks5(hostname, port);
+            console.log(`[PROXY] Connected successfully to ${hostname}:${port}`);
             clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
 
             // Write any buffered data

@@ -163,19 +163,25 @@ export class DiscordLauncher {
     // Wait for Discord to fully close
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Launch Discord with proxy flag
-    const proxyArg = `--proxy-server=http://${options.proxyHost}:${options.proxyPort}`;
+    // Launch Discord with proxy flags
+    const proxyServer = `http://${options.proxyHost}:${options.proxyPort}`;
+    const proxyArgs = [
+      `--proxy-server=${proxyServer}`,
+      `--host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE ${options.proxyHost}"`,
+      '--ignore-certificate-errors'
+    ];
 
     process.stdout.write('\x1b[33m\u25CF\x1b[0m Starting Discord with proxy... ');
 
     try {
       // Method 1: Use Update.exe with --processStart (recommended way)
-      const command = `"${installation.updateExe}" --processStart "${path.basename(installation.appExe)}" --process-start-args="${proxyArg}"`;
+      const argsString = proxyArgs.join(' ');
+      const command = `"${installation.updateExe}" --processStart "${path.basename(installation.appExe)}" --process-start-args="${argsString}"`;
 
       exec(command, { windowsHide: true }, (error) => {
         if (error) {
           // Method 2: Direct launch as fallback
-          const child = spawn('cmd.exe', ['/c', 'start', '', installation.appExe, proxyArg], {
+          const child = spawn('cmd.exe', ['/c', 'start', '', installation.appExe, ...proxyArgs], {
             detached: true,
             stdio: 'ignore',
             shell: true
@@ -201,7 +207,7 @@ export class DiscordLauncher {
 
       // Last resort: try direct spawn
       try {
-        const child = spawn(installation.appExe, [proxyArg], {
+        const child = spawn(installation.appExe, proxyArgs, {
           detached: true,
           stdio: 'ignore',
           shell: true

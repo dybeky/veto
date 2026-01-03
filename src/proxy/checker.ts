@@ -22,6 +22,7 @@ export class ProxyChecker {
       const socket = new net.Socket();
       let resolved = false;
       let step = 0;
+      const hasAuth = !!(proxy.username && proxy.password);
 
       const cleanup = (result: boolean) => {
         if (!resolved) {
@@ -38,15 +39,43 @@ export class ProxyChecker {
 
       socket.connect(proxy.port, proxy.host, () => {
         // Send SOCKS5 initial handshake
-        socket.write(Buffer.from([0x05, 0x01, 0x00]));
+        // 0x00 = no auth, 0x02 = username/password
+        if (hasAuth) {
+          socket.write(Buffer.from([0x05, 0x02, 0x00, 0x02]));
+        } else {
+          socket.write(Buffer.from([0x05, 0x01, 0x00]));
+        }
       });
 
       socket.on('data', (data) => {
         if (step === 0) {
           // Check authentication method response
-          if (data.length >= 2 && data[0] === 0x05 && data[1] === 0x00) {
-            step = 1;
-            // SOCKS5 handshake successful
+          if (data.length >= 2 && data[0] === 0x05) {
+            if (data[1] === 0x02 && hasAuth) {
+              // Server wants username/password auth
+              step = 1;
+              const username = Buffer.from(proxy.username!);
+              const password = Buffer.from(proxy.password!);
+              const authRequest = Buffer.concat([
+                Buffer.from([0x01, username.length]),
+                username,
+                Buffer.from([password.length]),
+                password
+              ]);
+              socket.write(authRequest);
+            } else if (data[1] === 0x00) {
+              // No auth required - success
+              cleanup(true);
+            } else {
+              cleanup(false);
+            }
+          } else {
+            cleanup(false);
+          }
+        } else if (step === 1) {
+          // Auth response
+          if (data.length >= 2 && data[0] === 0x01 && data[1] === 0x00) {
+            // Auth successful
             cleanup(true);
           } else {
             cleanup(false);

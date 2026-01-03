@@ -59,20 +59,8 @@ async function findWorkingProxy(): Promise<ProxyProvider> {
     }
   }
 
-  // Fetch fresh proxies from online sources
-  spinner.text = 'Fetching fresh proxy list from online sources...';
-  let freshProxies: ProxyProvider[] = [];
-  try {
-    freshProxies = await ProxyFetcher.fetchSocks5((msg) => {
-      spinner.text = msg;
-    });
-    spinner.text = `Fetched ${freshProxies.length} fresh proxies, testing...`;
-  } catch (err) {
-    spinner.text = 'Failed to fetch fresh proxies, trying built-in list...';
-  }
-
-  // Combine fresh proxies with built-in ones (fresh first)
-  const allProxies = [...freshProxies, ...BUILTIN_PROXIES];
+  // Use only built-in private proxies (no public proxy fetching)
+  const allProxies = [...BUILTIN_PROXIES];
 
   // Find working proxy using parallel search
   spinner.text = `Testing ${allProxies.length} proxies in parallel...`;
@@ -110,16 +98,8 @@ async function getNextWorkingProxy(): Promise<ProxyProvider | null> {
     await proxyCache.add(proxy, false);
   }
 
-  // Fetch fresh proxies
-  let freshProxies: ProxyProvider[] = [];
-  try {
-    freshProxies = await ProxyFetcher.fetchSocks5();
-  } catch {
-    // Ignore errors
-  }
-
-  // Combine fresh + built-in
-  const allProxies = [...freshProxies, ...BUILTIN_PROXIES];
+  // Use only built-in private proxies
+  const allProxies = [...BUILTIN_PROXIES];
 
   // Find new working proxy
   const workingProxy = await checker.findWorkingProxyParallel(allProxies);
