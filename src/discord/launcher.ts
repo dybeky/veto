@@ -86,21 +86,50 @@ export class DiscordLauncher {
   /**
    * Kill all Discord processes
    */
-  static async killDiscord(): Promise<void> {
-    if (process.platform !== 'win32') return;
+  static async killDiscord(): Promise<boolean> {
+    if (process.platform !== 'win32') return true;
 
-    const processNames = ['Discord.exe', 'DiscordPTB.exe', 'DiscordCanary.exe'];
+    const maxAttempts = 5;
 
-    for (const procName of processNames) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // PowerShell is most reliable for killing processes
       try {
-        await execAsync(`taskkill /F /IM ${procName} 2>nul`);
+        await execAsync(
+          `powershell -Command "Get-Process | Where-Object { $_.ProcessName -match '^Discord' } | Stop-Process -Force -ErrorAction SilentlyContinue"`,
+          { windowsHide: true, timeout: 5000 }
+        );
       } catch {
-        // Ignore errors (process might not exist)
+        // Ignore
+      }
+
+      // Also try taskkill for good measure
+      try {
+        await execAsync('taskkill /F /IM "Discord*" 2>nul', { windowsHide: true, timeout: 5000 });
+      } catch {
+        // Ignore
+      }
+
+      // Wait for processes to terminate
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Check if Discord is still running
+      if (!(await this.isDiscordRunning())) {
+        return true; // Successfully killed
       }
     }
 
-    // Wait for processes to fully terminate
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Final aggressive attempt with PowerShell
+    try {
+      await execAsync(
+        `powershell -Command "$procs = Get-Process | Where-Object { $_.ProcessName -match '^Discord' }; foreach ($p in $procs) { $p.Kill() }"`,
+        { windowsHide: true, timeout: 10000 }
+      );
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch {
+      // Ignore
+    }
+
+    return !(await this.isDiscordRunning());
   }
 
   /**
@@ -110,33 +139,41 @@ export class DiscordLauncher {
     const installation = await this.findDiscordInstallation();
 
     if (!installation) {
-      console.error('Discord not found. Please install Discord or launch it manually with:');
+      console.error('\x1b[31m\u2718 Discord not found\x1b[0m');
+      console.error('  Please install Discord or launch manually with:');
       console.error(`  discord.exe --proxy-server="http://${options.proxyHost}:${options.proxyPort}"`);
       return false;
     }
 
-    console.log(`Found Discord: ${installation.name}`);
-    console.log(`Path: ${installation.appExe}`);
+    console.log(`\x1b[36m\u25CF\x1b[0m Found: \x1b[1m${installation.name}\x1b[0m`);
 
     // Always kill existing Discord to restart with proxy
-    console.log('Closing Discord...');
-    await this.killDiscord();
+    const wasRunning = await this.isDiscordRunning();
+    if (wasRunning) {
+      process.stdout.write('\x1b[33m\u25CF\x1b[0m Closing Discord... ');
+      const killed = await this.killDiscord();
+      if (killed) {
+        console.log('\x1b[32m\u2714\x1b[0m');
+      } else {
+        console.log('\x1b[31m\u2718 Failed to close\x1b[0m');
+        return false;
+      }
+    }
 
     // Wait for Discord to fully close
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Launch Discord with proxy flag using cmd /c start
+    // Launch Discord with proxy flag
     const proxyArg = `--proxy-server=http://${options.proxyHost}:${options.proxyPort}`;
+
+    process.stdout.write('\x1b[33m\u25CF\x1b[0m Starting Discord with proxy... ');
 
     try {
       // Method 1: Use Update.exe with --processStart (recommended way)
       const command = `"${installation.updateExe}" --processStart "${path.basename(installation.appExe)}" --process-start-args="${proxyArg}"`;
 
-      console.log(`Launching Discord with proxy...`);
-
       exec(command, { windowsHide: true }, (error) => {
         if (error) {
-          console.error('Update.exe launch failed, trying direct launch...');
           // Method 2: Direct launch as fallback
           const child = spawn('cmd.exe', ['/c', 'start', '', installation.appExe, proxyArg], {
             detached: true,
@@ -148,11 +185,19 @@ export class DiscordLauncher {
       });
 
       // Give Discord time to start
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
-      return true;
+      const running = await this.isDiscordRunning();
+      if (running) {
+        console.log('\x1b[32m\u2714\x1b[0m');
+        console.log(`\x1b[32m\u2714 Discord running with proxy ${options.proxyHost}:${options.proxyPort}\x1b[0m`);
+        return true;
+      } else {
+        console.log('\x1b[31m\u2718\x1b[0m');
+        return false;
+      }
     } catch (err) {
-      console.error('Failed to launch Discord:', err);
+      console.log('\x1b[31m\u2718\x1b[0m');
 
       // Last resort: try direct spawn
       try {
@@ -162,8 +207,10 @@ export class DiscordLauncher {
           shell: true
         });
         child.unref();
+        console.log(`\x1b[32m\u2714 Discord launched (fallback)\x1b[0m`);
         return true;
       } catch {
+        console.error('\x1b[31m\u2718 Failed to launch Discord\x1b[0m');
         return false;
       }
     }
