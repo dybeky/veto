@@ -5,10 +5,13 @@ import { DISCORD_DOMAINS } from '../config/domains';
 import { ProxyProvider } from './providers';
 import { StatsMonitor } from '../monitoring/stats';
 import { TIMEOUTS, LIMITS } from '../config/constants';
+import { dohResolver } from '../dns/resolver';
+import { logger } from '../utils/logger';
 
 export interface ProxyServerOptions {
   onProxyFailed?: (proxy: ProxyProvider) => Promise<ProxyProvider | null>;
   statsMonitor?: StatsMonitor;
+  useDoH?: boolean; // Use DNS over HTTPS
 }
 
 export class ProxyServer {
@@ -18,12 +21,28 @@ export class ProxyServer {
   private activeConnections: Set<Duplex> = new Set();
   private options: ProxyServerOptions;
   private stats: StatsMonitor;
+  private useDoH: boolean;
 
   constructor(port: number, upstreamProxy: ProxyProvider, options: ProxyServerOptions = {}) {
     this.port = port;
     this.upstreamProxy = upstreamProxy;
     this.options = options;
     this.stats = options.statsMonitor || new StatsMonitor();
+    this.useDoH = options.useDoH ?? true; // Enable DoH by default
+  }
+
+  /**
+   * Resolve hostname, using DoH for Discord domains if enabled
+   */
+  private async resolveHost(hostname: string): Promise<string> {
+    if (this.useDoH && this.isDiscordDomain(hostname)) {
+      const resolved = await dohResolver.resolve(hostname);
+      if (resolved) {
+        logger.debug(`DoH resolved ${hostname} -> ${resolved}`);
+        return resolved;
+      }
+    }
+    return hostname; // Fallback to hostname (let proxy resolve)
   }
 
   private isDiscordDomain(host: string): boolean {
@@ -41,6 +60,32 @@ export class ProxyServer {
 
   private getProxyKey(): string {
     return `${this.upstreamProxy.protocol}://${this.upstreamProxy.host}:${this.upstreamProxy.port}`;
+  }
+
+  /**
+   * Connect through SOCKS5 with retry logic
+   */
+  private async connectThroughSocks5WithRetry(host: string, port: number, retries: number = LIMITS.MAX_RETRIES): Promise<net.Socket> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const socket = await this.connectThroughSocks5(host, port);
+        if (attempt > 0) {
+          logger.info(`Connection succeeded on attempt ${attempt + 1} for ${host}:${port}`);
+        }
+        return socket;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        logger.warn(`Connection attempt ${attempt + 1}/${retries + 1} failed for ${host}:${port}: ${lastError.message}`);
+
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, TIMEOUTS.RETRY_DELAY));
+        }
+      }
+    }
+
+    throw lastError || new Error('Connection failed after retries');
   }
 
   private async connectThroughSocks5(host: string, port: number): Promise<net.Socket> {
@@ -178,13 +223,16 @@ export class ProxyServer {
         this.trackConnection(clientSocket);
         this.stats.connectionStarted();
 
-        console.log(`[CONNECT] ${hostname}:${port} - Discord: ${this.isDiscordDomain(hostname)}`);
+        logger.debug(`[CONNECT] ${hostname}:${port} - Discord: ${this.isDiscordDomain(hostname)}`);
 
         if (this.isDiscordDomain(hostname)) {
           try {
-            console.log(`[PROXY] Connecting to ${hostname}:${port} via ${this.upstreamProxy.host}:${this.upstreamProxy.port}`);
-            const proxySocket = await this.connectThroughSocks5(hostname, port);
-            console.log(`[PROXY] Connected successfully to ${hostname}:${port}`);
+            // Resolve hostname using DoH if enabled
+            const resolvedHost = await this.resolveHost(hostname);
+
+            logger.info(`[PROXY] Connecting to ${hostname}:${port} via ${this.upstreamProxy.host}:${this.upstreamProxy.port}`);
+            const proxySocket = await this.connectThroughSocks5WithRetry(resolvedHost, port);
+            logger.info(`[PROXY] Connected successfully to ${hostname}:${port}`);
             clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
 
             // Write any buffered data
@@ -213,13 +261,13 @@ export class ProxyServer {
             };
 
             proxySocket.on('error', (err) => {
-              console.error(`Proxy socket error for ${hostname}:`, err.message);
+              logger.error(`Proxy socket error for ${hostname}:`, err.message);
               clientSocket.end();
               cleanup();
             });
 
             clientSocket.on('error', (err) => {
-              console.error(`Client socket error for ${hostname}:`, err.message);
+              logger.error(`Client socket error for ${hostname}:`, err.message);
               proxySocket.end();
               cleanup();
             });
@@ -228,7 +276,7 @@ export class ProxyServer {
             clientSocket.on('close', cleanup);
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
-            console.error(`Failed to connect through proxy to ${hostname}:`, errorMsg);
+            logger.error(`Failed to connect through proxy to ${hostname}: ${errorMsg}`);
 
             this.stats.connectionFailed(this.getProxyKey());
             clientSocket.end();
@@ -236,11 +284,14 @@ export class ProxyServer {
             // Check if we should switch proxies
             const failures = this.stats.getProxyFailures(this.getProxyKey());
             if (failures >= LIMITS.MAX_PROXY_FAILURES && this.options.onProxyFailed) {
+              logger.warn(`Proxy ${this.upstreamProxy.name} failed ${failures} times, switching...`);
               const newProxy = await this.options.onProxyFailed(this.upstreamProxy);
               if (newProxy) {
-                console.log(`Switching to new proxy: ${newProxy.name}`);
+                logger.info(`Switched to new proxy: ${newProxy.name} (${newProxy.country})`);
                 this.upstreamProxy = newProxy;
                 this.stats.resetProxyFailures(this.getProxyKey());
+              } else {
+                logger.error('No alternative proxy available!');
               }
             }
           }
@@ -262,13 +313,13 @@ export class ProxyServer {
           };
 
           serverSocket.on('error', (err) => {
-            console.error(`Direct connection error for ${hostname}:`, err.message);
+            logger.error(`Direct connection error for ${hostname}: ${err.message}`);
             this.stats.connectionFailed();
             clientSocket.end();
           });
 
           clientSocket.on('error', (err) => {
-            console.error(`Client socket error for ${hostname}:`, err.message);
+            logger.error(`Client socket error for ${hostname}: ${err.message}`);
             serverSocket.end();
           });
 

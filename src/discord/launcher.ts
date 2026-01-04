@@ -165,31 +165,32 @@ export class DiscordLauncher {
 
     // Launch Discord with proxy flags
     const proxyServer = `http://${options.proxyHost}:${options.proxyPort}`;
-    const proxyArgs = [
-      `--proxy-server=${proxyServer}`
-    ];
 
     process.stdout.write('\x1b[33m\u25CF\x1b[0m Starting Discord with proxy... ');
 
     try {
-      // Method 1: Use Update.exe with --processStart (recommended way)
-      const argsString = proxyArgs.join(' ');
-      const command = `"${installation.updateExe}" --processStart "${path.basename(installation.appExe)}" --process-start-args="${argsString}"`;
-
-      exec(command, { windowsHide: true }, (error) => {
-        if (error) {
-          // Method 2: Direct launch as fallback
-          const child = spawn('cmd.exe', ['/c', 'start', '', installation.appExe, ...proxyArgs], {
-            detached: true,
-            stdio: 'ignore',
-            shell: true
-          });
-          child.unref();
+      // Launch Discord.exe directly with proxy arguments
+      // This is more reliable than using Update.exe
+      const child = spawn(installation.appExe, [
+        `--proxy-server=${proxyServer}`,
+        '--ignore-certificate-errors',
+        '--disable-http-cache',
+        '--no-proxy-server=<-loopback>'
+      ], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+        env: {
+          ...process.env,
+          HTTPS_PROXY: proxyServer,
+          HTTP_PROXY: proxyServer,
+          ALL_PROXY: proxyServer
         }
       });
+      child.unref();
 
-      // Give Discord time to start
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Give Discord more time to start
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
       const running = await this.isDiscordRunning();
       if (running) {
@@ -198,25 +199,41 @@ export class DiscordLauncher {
         return true;
       } else {
         console.log('\x1b[31m\u2718\x1b[0m');
-        return false;
+        // Fallback: try Update.exe method
+        return this.launchViaUpdateExe(installation, proxyServer);
       }
     } catch (err) {
       console.log('\x1b[31m\u2718\x1b[0m');
+      return this.launchViaUpdateExe(installation, proxyServer);
+    }
+  }
 
-      // Last resort: try direct spawn
-      try {
-        const child = spawn(installation.appExe, proxyArgs, {
-          detached: true,
-          stdio: 'ignore',
-          shell: true
-        });
-        child.unref();
-        console.log(`\x1b[32m\u2714 Discord launched (fallback)\x1b[0m`);
+  /**
+   * Fallback method using Update.exe
+   */
+  private static async launchViaUpdateExe(installation: DiscordInstallation, proxyServer: string): Promise<boolean> {
+    try {
+      console.log('\x1b[33m\u25CF\x1b[0m Trying alternative launch method...');
+
+      const argsString = `--proxy-server=${proxyServer}`;
+      const command = `"${installation.updateExe}" --processStart "${path.basename(installation.appExe)}" --process-start-args="${argsString}"`;
+
+      await execAsync(command, { windowsHide: true, timeout: 10000 });
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const running = await this.isDiscordRunning();
+      if (running) {
+        console.log('\x1b[32m\u2714 Discord launched via Update.exe\x1b[0m');
         return true;
-      } catch {
-        console.error('\x1b[31m\u2718 Failed to launch Discord\x1b[0m');
-        return false;
       }
+
+      console.error('\x1b[31m\u2718 Failed to launch Discord\x1b[0m');
+      console.error('  Try launching Discord manually with:');
+      console.error(`  "${installation.appExe}" --proxy-server=${proxyServer}`);
+      return false;
+    } catch {
+      console.error('\x1b[31m\u2718 Failed to launch Discord\x1b[0m');
+      return false;
     }
   }
 
